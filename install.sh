@@ -19,12 +19,46 @@ UPDATE_PATH="$INSTALL_DIR/update.sh"
 LA_DIR="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs"
 MOVIES_DIR="$HOME/Movies"
+APPS_DIR="$HOME/Applications"
+APP_BUNDLE="$APPS_DIR/MediaImport.app"
+APP_EXEC="$APP_BUNDLE/Contents/MacOS/MediaImport"
 
 IMPORT_PLIST="$LA_DIR/com.user.importmedia.plist"
 UPDATE_PLIST="$LA_DIR/com.user.importmedia.update.plist"
 
-mkdir -p "$LA_DIR" "$LOG_DIR" "$MOVIES_DIR"
+mkdir -p "$LA_DIR" "$LOG_DIR" "$MOVIES_DIR" "$APP_BUNDLE/Contents/MacOS"
 chmod +x "$INSTALL_DIR"/*.sh
+
+# ---------- Generate wrapper .app bundle ----------
+# macOS won't let you grant Full Disk Access to /bin/bash directly on recent versions,
+# so we wrap our script inside a .app bundle that can be FDA-granted via Finder drag.
+cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST_EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>MediaImport</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.user.mediaimport</string>
+    <key>CFBundleName</key>
+    <string>MediaImport</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+PLIST_EOF
+
+cat > "$APP_EXEC" <<EOF
+#!/bin/bash
+exec "$SCRIPT_PATH" "\$@"
+EOF
+chmod +x "$APP_EXEC"
+touch "$APP_BUNDLE"
 
 # ---------- Generate import LaunchAgent ----------
 cat > "$IMPORT_PLIST" <<EOF
@@ -36,8 +70,7 @@ cat > "$IMPORT_PLIST" <<EOF
     <string>com.user.importmedia</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>$SCRIPT_PATH</string>
+        <string>$APP_EXEC</string>
     </array>
     <key>WatchPaths</key>
     <array>
@@ -98,15 +131,18 @@ cat <<EOF
 ✅ インストール完了
 ==========================================
 スクリプト場所  : $SCRIPT_PATH
+ラッパー .app   : $APP_BUNDLE
 保存先          : $MOVIES_DIR/<ソース>/<年>/<日付>/<機種>/
 ログ            : $LOG_DIR/import-media.log
 自動アップデート : 毎日 04:00 に git pull
 ==========================================
 
-次の手順:
-  1. システム設定 → プライバシーとセキュリティ → フルディスクアクセス
-  2. '+' ボタン → Cmd+Shift+G → /bin → 'bash' を選択 → 追加
-  3. SDカードを差すか AirDrop で動画を受信 → 自動取り込み開始
+次の手順（これをやらないと動きません）:
+  1. Finder で ~/Applications を開く（Cmd+Shift+G で ~/Applications）
+  2. システム設定 → プライバシーとセキュリティ → フルディスクアクセス
+  3. Finder の MediaImport アプリを、FDA リストに **ドラッグ＆ドロップ**
+  4. 追加された MediaImport のトグルを ON にする
+  5. SDカードを差すか AirDrop で動画を受信 → 自動取り込み開始
 
 EOF
 
