@@ -56,6 +56,24 @@ open_in_finder() {
   /usr/bin/open "$1" >/dev/null 2>&1 || true
 }
 
+# Ask the user whether to import a freshly-mounted volume.
+# Returns 0 = approve (or no response within timeout), 1 = user cancelled.
+ask_user_to_import() {
+  local volname="$1" label="$2" total="$3"
+  local result
+  result=$(/usr/bin/osascript <<APPLESCRIPT 2>/dev/null
+display dialog "${volname} に取り込み可能なファイルが ${total} 件あります。
+
+取り込みますか？" with title "Media Import: ${label}" buttons {"スキップ", "取り込む"} default button "取り込む" giving up after 60
+APPLESCRIPT
+)
+  # Dialog couldn't be shown (e.g. no GUI session) → default to approve.
+  [[ -z "$result" ]] && return 0
+  # If "取り込む" appears in the result (explicit click OR timeout default), approve.
+  [[ "$result" == *"取り込む"* ]] && return 0
+  return 1
+}
+
 # Verify a destination file is a faithful copy of the source.
 # Returns 0 (success) only when the configured check passes.
 verify_copy() {
@@ -283,7 +301,16 @@ import_volume() {
 
   local label="${source_hint:-SDカード}"
   log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
-  notify "🟢 $label $(basename "$vol")" "$total 件を確認中..."
+
+  # Ask the user for permission before touching their card.
+  # Default-on-timeout so unattended runs still import; explicit "スキップ" bails out.
+  if ! ask_user_to_import "$(basename "$vol")" "$label" "$total"; then
+    log "User cancelled: $vol"
+    notify "$label $(basename "$vol")" "スキップ（ユーザー操作）"
+    return
+  fi
+
+  notify "🟢 $label $(basename "$vol")" "$total 件を取り込み開始..."
 
   # Open the destination folder right away so the user can see files arriving in real time.
   # For a known source (GoPro/DJI/etc.) open that source root; otherwise open ~/Movies.
