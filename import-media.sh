@@ -174,19 +174,41 @@ device_folder_name() {
   [[ -n "$n" ]] && echo "$n" || echo "Unknown"
 }
 
-# ---------- Source detection for a single file (used for Downloads) ----------
+# ---------- Source detection for a single file ----------
+# Returns a brand name (GoPro / iPhone / DJI / Sony / Canon / ...) or "Other".
+# Uses MP4 Spotlight metadata first, then filename heuristics. Forces an mdimport
+# retry on first miss because external volumes are often not Spotlight-indexed.
 detect_source_from_file() {
   local f="$1" make=""
   make=$(/usr/bin/mdls -raw -name kMDItemAcquisitionMake "$f" 2>/dev/null || true)
+  if [[ -z "$make" || "$make" == "(null)" ]]; then
+    /usr/bin/mdimport "$f" >/dev/null 2>&1
+    make=$(/usr/bin/mdls -raw -name kMDItemAcquisitionMake "$f" 2>/dev/null || true)
+  fi
   case "$make" in
-    *GoPro*|*GOPRO*) echo "GoPro";  return ;;
-    *Apple*)         echo "iPhone"; return ;;
-    *DJI*|*dji*)     echo "DJI";    return ;;
+    *GoPro*|*GOPRO*)                  echo "GoPro";     return ;;
+    *Apple*)                          echo "iPhone";    return ;;
+    *DJI*|*dji*)                      echo "DJI";       return ;;
+    *Sony*|*SONY*)                    echo "Sony";      return ;;
+    *Canon*|*CANON*)                  echo "Canon";     return ;;
+    *Nikon*|*NIKON*)                  echo "Nikon";     return ;;
+    *Panasonic*|*PANASONIC*)          echo "Panasonic"; return ;;
+    *Olympus*|*OLYMPUS*|*"OM Digital"*) echo "Olympus"; return ;;
+    *Fujifilm*|*FUJIFILM*)            echo "Fujifilm";  return ;;
+    *Insta360*|*INSTA360*)            echo "Insta360";  return ;;
+    *Samsung*|*SAMSUNG*)              echo "Samsung";   return ;;
+    *Google*|*GOOGLE*)                echo "Pixel";     return ;;
+    *Ricoh*|*RICOH*)                  echo "Ricoh";     return ;;
   esac
   case "$(basename "$f")" in
-    GX*|GH*|GOPR*)                            echo "GoPro";  return ;;
-    DJI_*)                                    echo "DJI";    return ;;
-    IMG_*.MOV|IMG_*.mov|IMG_*.MP4|IMG_*.mp4)  echo "iPhone"; return ;;
+    GX*|GH*|GOPR*)                                echo "GoPro";     return ;;
+    DJI_*)                                        echo "DJI";       return ;;
+    IMG_*.MOV|IMG_*.mov|IMG_*.MP4|IMG_*.mp4)      echo "iPhone";    return ;;
+    MVI_*|IMG_*.CR2|IMG_*.cr2|IMG_*.CR3|IMG_*.cr3) echo "Canon";    return ;;
+    DSC_*|_DSC*|NIKON_*)                          echo "Nikon";     return ;;
+    P[0-9][0-9][0-9][0-9][0-9][0-9][0-9].MTS|P[0-9]*.M2TS) echo "Panasonic"; return ;;
+    PXL_*)                                        echo "Pixel";     return ;;
+    VID_*)                                        echo "Android";   return ;;
   esac
   echo "Other"
 }
@@ -321,14 +343,18 @@ import_volume() {
   fi
 
   local copied=0 scanned=0 last_source=""
+  local volname
+  volname=$(basename "$vol")
   while IFS= read -r -d '' f; do
     scanned=$((scanned + 1))
     # Use the volume hint if known, else detect per-file from MP4 metadata / filename.
+    # If still unknown, fall back to the volume name itself instead of "Other".
     local source
     if [[ -n "$source_hint" ]]; then
       source="$source_hint"
     else
       source=$(detect_source_from_file "$f")
+      [[ "$source" == "Other" ]] && source="$volname"
     fi
     if place_file "$f" "$source" "copy"; then
       copied=$((copied + 1))
@@ -382,6 +408,8 @@ scan_downloads() {
     is_settled "$f" || { log "skip (still writing): $f"; continue; }
     local source
     source=$(detect_source_from_file "$f")
+    # Files from Downloads with no detectable device → label them "Downloads" instead of "Other".
+    [[ "$source" == "Other" ]] && source="Downloads"
     if place_file "$f" "$source" "move"; then
       placed=$((placed + 1))
       last_dest="$DEST_BASE/$source"
