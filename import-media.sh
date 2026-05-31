@@ -240,45 +240,76 @@ detect_volume_source() {
   echo ""
 }
 
+# Lists all importable media files on a volume.
+# Uses DCIM/ if present (full depth), else scans the volume root up to maxdepth 6.
+find_volume_media() {
+  local vol="$1"
+  shift
+  local root="$vol" maxdepth_arg=()
+  if [[ -d "$vol/DCIM" ]]; then
+    root="$vol/DCIM"
+  else
+    maxdepth_arg=(-maxdepth 6)
+  fi
+  /usr/bin/find "$root" "${maxdepth_arg[@]}" -type f \
+    ! -name '._*' ! -name '.DS_Store' \( \
+      -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
+      -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
+      -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
+      -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
+      -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
+    \) "$@" 2>/dev/null
+}
+
 import_volume() {
-  local vol="$1" source
-  source=$(detect_volume_source "$vol")
-  [[ -z "$source" ]] && return
-  log "==> Volume $vol detected as $source"
+  local vol="$1"
+  local source_hint
+  source_hint=$(detect_volume_source "$vol")   # may be empty
 
-  # Pre-count so the start notification can show how many files are on the card.
+  # Pre-count. Skip volumes with no media at all so plugging in a USB drive doesn't fire empty notifications.
   local total
-  total=$(/usr/bin/find "$vol/DCIM" -type f ! -name '._*' ! -name '.DS_Store' \( \
-        -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.LRV' \
-        -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
-        -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
-      \) 2>/dev/null | wc -l | tr -d ' ')
-  notify "🟢 $source $(basename "$vol")" "$total 件を確認中..."
+  total=$(find_volume_media "$vol" | wc -l | tr -d ' ')
+  [[ $total -eq 0 ]] && return
 
-  local copied=0 scanned=0
+  local label="${source_hint:-SDカード}"
+  log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
+  notify "🟢 $label $(basename "$vol")" "$total 件を確認中..."
+
+  local copied=0 scanned=0 last_source=""
   while IFS= read -r -d '' f; do
     scanned=$((scanned + 1))
+    # Use the volume hint if known, else detect per-file from MP4 metadata / filename.
+    local source
+    if [[ -n "$source_hint" ]]; then
+      source="$source_hint"
+    else
+      source=$(detect_source_from_file "$f")
+    fi
     if place_file "$f" "$source" "copy"; then
       copied=$((copied + 1))
+      last_source="$source"
     fi
-  done < <(/usr/bin/find "$vol/DCIM" -type f ! -name '._*' ! -name '.DS_Store' \( \
-        -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.LRV' \
-        -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
-        -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
-      \) -print0 2>/dev/null)
-  log "<== $source done: $copied new / $scanned scanned ($vol)"
+  done < <(find_volume_media "$vol" -print0)
+  log "<== Volume done: $copied new / $scanned scanned ($vol)"
 
   if [[ $copied -gt 0 ]]; then
-    notify_done "$source ($(basename "$vol"))" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
-    open_in_finder "$DEST_BASE/$source"
+    notify_done "$label ($(basename "$vol"))" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
+    open_in_finder "$DEST_BASE/${source_hint:-$last_source}"
   else
-    notify "$source $(basename "$vol")" "新規なし (既存 $scanned 件すべてスキップ)"
+    notify "$label $(basename "$vol")" "新規なし (既存 $scanned 件すべてスキップ)"
   fi
 }
 
 scan_volumes() {
   for vol in /Volumes/*/; do
-    [[ -d "${vol}DCIM" ]] && import_volume "${vol%/}"
+    vol="${vol%/}"
+    # Skip macOS system volumes — never scan the boot drive.
+    case "$(basename "$vol")" in
+      "Macintosh HD"|"Macintosh HD - Data"|"Recovery"|"Preboot"|"VM"|"Update"|"xarts"|"iSCPreboot")
+        continue ;;
+    esac
+    [[ -d "$vol/System" ]] && continue   # boot-volume firmlink safety net
+    import_volume "$vol"
   done
 }
 
