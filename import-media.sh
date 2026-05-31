@@ -245,20 +245,25 @@ detect_volume_source() {
 find_volume_media() {
   local vol="$1"
   shift
-  local root="$vol" maxdepth_arg=()
   if [[ -d "$vol/DCIM" ]]; then
-    root="$vol/DCIM"
+    /usr/bin/find "$vol/DCIM" -type f \
+      ! -name '._*' ! -name '.DS_Store' \( \
+        -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
+        -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
+        -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
+        -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
+        -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
+      \) "$@" 2>/dev/null
   else
-    maxdepth_arg=(-maxdepth 6)
+    /usr/bin/find "$vol" -maxdepth 6 -type f \
+      ! -name '._*' ! -name '.DS_Store' \( \
+        -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
+        -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
+        -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
+        -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
+        -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
+      \) "$@" 2>/dev/null
   fi
-  /usr/bin/find "$root" "${maxdepth_arg[@]}" -type f \
-    ! -name '._*' ! -name '.DS_Store' \( \
-      -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
-      -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
-      -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
-      -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
-      -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
-    \) "$@" 2>/dev/null
 }
 
 import_volume() {
