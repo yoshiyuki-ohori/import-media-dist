@@ -15,7 +15,7 @@ mkdir -p "$DEST_BASE" "$(dirname "$LOG")" "$(dirname "$LOCK_FILE")"
 
 # ==== Configuration ====
 # Delete file from the SD card after a successfully verified copy.
-DELETE_FROM_CARD="true"          # "true" or "false"
+DELETE_FROM_CARD="false"         # "true" or "false"
 # How to verify the copy before deleting source:
 #   size  — file sizes match (rsync also runs its own rolling checksum during transfer). Fast.
 #   hash  — full SHA-256 compare on both sides. Bulletproof but slow (~2-3 min per 17GB file).
