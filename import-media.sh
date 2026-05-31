@@ -275,6 +275,14 @@ import_volume() {
   log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
   notify "🟢 $label $(basename "$vol")" "$total 件を確認中..."
 
+  # Open the destination folder right away so the user can see files arriving in real time.
+  # For a known source (GoPro/DJI/etc.) open that source root; otherwise open ~/Movies.
+  if [[ -n "$source_hint" ]]; then
+    open_in_finder "$DEST_BASE/$source_hint"
+  else
+    open_in_finder "$DEST_BASE"
+  fi
+
   local copied=0 scanned=0 last_source=""
   while IFS= read -r -d '' f; do
     scanned=$((scanned + 1))
