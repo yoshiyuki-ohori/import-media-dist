@@ -274,12 +274,24 @@ place_file() {
 # ---------- SD card handling ----------
 detect_volume_source() {
   local vol="$1"
-  if [[ -f "$vol/MISC/version.txt" ]] || \
-     ls -d "$vol/DCIM"/*GOPRO 2>/dev/null | grep -q .; then
+  # Check unambiguous DCIM markers first — these are vendor-specific and reliable.
+  if ls -d "$vol/DCIM"/*GOPRO 2>/dev/null | grep -q .; then
     echo "GoPro"; return
   fi
-  if [[ -d "$vol/MISC/DJI" ]] || \
-     /usr/bin/find "$vol/DCIM" -maxdepth 4 -name 'DJI_*' -print -quit 2>/dev/null | grep -q .; then
+  if /usr/bin/find "$vol/DCIM" -maxdepth 4 -name 'DJI_*' -print -quit 2>/dev/null | grep -q .; then
+    echo "DJI"; return
+  fi
+  # Fallback: parse MISC/version.txt content (both GoPro and DJI write this file,
+  # so we must check what's inside instead of just its existence).
+  if [[ -f "$vol/MISC/version.txt" ]]; then
+    if /usr/bin/grep -qi "gopro\|hero" "$vol/MISC/version.txt" 2>/dev/null; then
+      echo "GoPro"; return
+    fi
+    if /usr/bin/grep -qi "dji\|osmo" "$vol/MISC/version.txt" 2>/dev/null; then
+      echo "DJI"; return
+    fi
+  fi
+  if [[ -d "$vol/MISC/DJI" ]]; then
     echo "DJI"; return
   fi
   echo ""
