@@ -41,6 +41,11 @@ notify() {
   /usr/bin/osascript -e "display notification \"$2\" with title \"Media Import\" subtitle \"$1\" sound name \"Tink\"" >/dev/null 2>&1 || true
 }
 
+# Silent variant for repeated progress pings — no sound, only banner.
+notify_silent() {
+  /usr/bin/osascript -e "display notification \"$2\" with title \"Media Import\" subtitle \"$1\"" >/dev/null 2>&1 || true
+}
+
 notify_done() {
   # Louder completion notification.
   /usr/bin/osascript -e "display notification \"$2\" with title \"✅ 取り込み完了\" subtitle \"$1\" sound name \"Glass\"" >/dev/null 2>&1 || true
@@ -301,6 +306,10 @@ import_volume() {
     if place_file "$f" "$source" "copy"; then
       copied=$((copied + 1))
       last_source="$source"
+    fi
+    # Progress ping every 5 scanned files (silent, no completion sound).
+    if [[ $((scanned % 5)) -eq 0 ]] && [[ $scanned -lt $total ]]; then
+      notify_silent "🔄 $label ($scanned / $total)" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
     fi
   done < <(find_volume_media "$vol" -print0)
   log "<== Volume done: $copied new / $scanned scanned ($vol)"
