@@ -35,18 +35,14 @@ chmod +x "$INSTALL_DIR"/*.sh
 # Per-user config (lives outside the repo, survives git pull updates).
 CONFIG_DIR="$HOME/.config/import-media"
 CONFIG_FILE="$CONFIG_DIR/config.sh"
+DEST_FILE="$CONFIG_DIR/dest-base.txt"
 mkdir -p "$CONFIG_DIR"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   cat > "$CONFIG_FILE" <<'EOF'
-# import-media personal config — edited only locally, NOT updated by git pull.
-# Uncomment lines to enable.
-
-# Change where imported videos are stored.
-# Example: a Google Drive folder for cloud sync.
-# DEST_BASE_OVERRIDE="$HOME/Library/CloudStorage/GoogleDrive-YOUR_EMAIL/My Drive/Videos"
+# import-media advanced config — edited only locally, NOT updated by git pull.
+# Day-to-day destination changes should use:  ~/.import-media/set-destination.sh
 
 # Always ignore specific external volumes (your work SSDs, backup drives, etc.).
-# Edit the case to add as many as you want, or wipe it for no ignores.
 should_ignore_volume() {
   case "$1" in
     # "BackupSSD"|"WorkDrive") return 0 ;;
@@ -55,6 +51,12 @@ should_ignore_volume() {
 }
 EOF
   echo "✏️  Personal config template created at: $CONFIG_FILE"
+fi
+
+# On first install (no destination chosen yet), pop a folder picker so the user
+# can pick where videos should go. Skipped in --quiet mode (auto-update reruns).
+if [[ $QUIET -eq 0 ]] && [[ ! -f "$DEST_FILE" ]]; then
+  /bin/bash "$INSTALL_DIR/set-destination.sh" || true
 fi
 
 # ---------- Generate wrapper .app bundle ----------

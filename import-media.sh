@@ -16,13 +16,22 @@ LOCK_FILE="$HOME/Library/Caches/import-media.pid"
 # Return 0 to ignore the volume, 1 to import it.
 should_ignore_volume() { return 1; }
 
-# Load per-user config (lives outside the repo, survives git pull updates).
+# Destination override from the simple text file written by set-destination.sh.
+DEST_BASE_FILE="$HOME/.config/import-media/dest-base.txt"
+if [[ -f "$DEST_BASE_FILE" ]]; then
+  saved_dest=$(/usr/bin/head -1 "$DEST_BASE_FILE" 2>/dev/null | /usr/bin/sed 's:/*$::')
+  if [[ -n "$saved_dest" && -d "$saved_dest" ]]; then
+    DEST_BASE="$saved_dest"
+  fi
+fi
+
+# Load per-user config for advanced options (ignore_volumes etc.).
 CONFIG_FILE="$HOME/.config/import-media/config.sh"
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
 fi
-# Apply DEST_BASE override from the config if present.
+# Config.sh can still override DEST_BASE (advanced users).
 [[ -n "${DEST_BASE_OVERRIDE:-}" ]] && DEST_BASE="$DEST_BASE_OVERRIDE"
 
 mkdir -p "$DEST_BASE" "$(dirname "$LOG")" "$(dirname "$LOCK_FILE")"
