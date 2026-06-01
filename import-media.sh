@@ -56,6 +56,24 @@ open_in_finder() {
   /usr/bin/open "$1" >/dev/null 2>&1 || true
 }
 
+VOL_SIG_DIR="$HOME/Library/Caches/import-media-vols"
+
+# Per-volume signature so we can skip already-processed volumes silently.
+# Combines: device path + file count + newest mtime. Any change triggers a re-prompt.
+get_volume_signature() {
+  local vol="$1" device count newest
+  device=$(/bin/df "$vol" 2>/dev/null | /usr/bin/tail -1 | /usr/bin/awk '{print $1}')
+  count=$(find_volume_media "$vol" 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d ' ')
+  newest=$(find_volume_media "$vol" 2>/dev/null | while IFS= read -r f; do /usr/bin/stat -f %m "$f" 2>/dev/null; done | /usr/bin/sort -n | /usr/bin/tail -1)
+  echo "${device}|${count}|${newest:-0}"
+}
+
+vol_sig_file() {
+  local safe
+  safe=$(/usr/bin/basename "$1" | /usr/bin/tr -c '[:alnum:]._-' '_')
+  echo "$VOL_SIG_DIR/$safe"
+}
+
 # Ask the user whether to import a freshly-mounted volume.
 # Returns 0 = approve (or no response within timeout), 1 = user cancelled.
 ask_user_to_import() {
@@ -336,6 +354,19 @@ import_volume() {
   local label="${source_hint:-SDカード}"
   log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
 
+  # Suppress repeat dialogs while the volume's contents haven't changed.
+  # If the signature matches our cached value, this volume is already up-to-date
+  # — silently exit instead of bothering the user again.
+  mkdir -p "$VOL_SIG_DIR"
+  local sig_file current_sig saved_sig
+  sig_file=$(vol_sig_file "$vol")
+  current_sig=$(get_volume_signature "$vol")
+  saved_sig=$(/bin/cat "$sig_file" 2>/dev/null || echo "")
+  if [[ -n "$saved_sig" && "$current_sig" == "$saved_sig" ]]; then
+    log "    unchanged since last scan, skipping (sig: $current_sig)"
+    return
+  fi
+
   # Ask the user for permission before touching their card.
   # Default-on-timeout so unattended runs still import; explicit "スキップ" bails out.
   if ! ask_user_to_import "$(basename "$vol")" "$label" "$total"; then
@@ -378,6 +409,10 @@ import_volume() {
     fi
   done < <(find_volume_media "$vol" -print0)
   log "<== Volume done: $copied new / $scanned scanned ($vol)"
+
+  # Remember this volume's state so future /Volumes events don't re-prompt unnecessarily.
+  # The signature changes if files are added, removed, or the card is remounted.
+  echo "$current_sig" > "$sig_file"
 
   if [[ $copied -gt 0 ]]; then
     notify_done "$label ($(basename "$vol"))" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
