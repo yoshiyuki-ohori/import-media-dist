@@ -32,6 +32,31 @@ mkdir -p "$LA_DIR" "$LOG_DIR" "$MOVIES_DIR" "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$MOVIES_DIR/DJI" "$MOVIES_DIR/GoPro" "$MOVIES_DIR/iPhone" "$MOVIES_DIR/Downloads"
 chmod +x "$INSTALL_DIR"/*.sh
 
+# Per-user config (lives outside the repo, survives git pull updates).
+CONFIG_DIR="$HOME/.config/import-media"
+CONFIG_FILE="$CONFIG_DIR/config.sh"
+mkdir -p "$CONFIG_DIR"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  cat > "$CONFIG_FILE" <<'EOF'
+# import-media personal config — edited only locally, NOT updated by git pull.
+# Uncomment lines to enable.
+
+# Change where imported videos are stored.
+# Example: a Google Drive folder for cloud sync.
+# DEST_BASE_OVERRIDE="$HOME/Library/CloudStorage/GoogleDrive-YOUR_EMAIL/My Drive/Videos"
+
+# Always ignore specific external volumes (your work SSDs, backup drives, etc.).
+# Edit the case to add as many as you want, or wipe it for no ignores.
+should_ignore_volume() {
+  case "$1" in
+    # "BackupSSD"|"WorkDrive") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+EOF
+  echo "✏️  Personal config template created at: $CONFIG_FILE"
+fi
+
 # ---------- Generate wrapper .app bundle ----------
 # macOS won't let you grant Full Disk Access to /bin/bash directly on recent versions,
 # so we wrap our script inside a .app bundle that can be FDA-granted via Finder drag.

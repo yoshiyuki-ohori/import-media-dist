@@ -11,6 +11,20 @@ DEST_BASE="$HOME/Movies"
 DOWNLOADS="$HOME/Downloads"
 LOG="$HOME/Library/Logs/import-media.log"
 LOCK_FILE="$HOME/Library/Caches/import-media.pid"
+
+# Default hook — overridable in config to blacklist specific volume names.
+# Return 0 to ignore the volume, 1 to import it.
+should_ignore_volume() { return 1; }
+
+# Load per-user config (lives outside the repo, survives git pull updates).
+CONFIG_FILE="$HOME/.config/import-media/config.sh"
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+# Apply DEST_BASE override from the config if present.
+[[ -n "${DEST_BASE_OVERRIDE:-}" ]] && DEST_BASE="$DEST_BASE_OVERRIDE"
+
 mkdir -p "$DEST_BASE" "$(dirname "$LOG")" "$(dirname "$LOCK_FILE")"
 
 # ==== Configuration ====
@@ -372,6 +386,8 @@ import_volume() {
   if ! ask_user_to_import "$(basename "$vol")" "$label" "$total"; then
     log "User cancelled: $vol"
     notify "$label $(basename "$vol")" "スキップ（ユーザー操作）"
+    # Remember the rejection so we don't keep nagging while this volume is unchanged.
+    echo "$current_sig" > "$sig_file"
     return
   fi
 
@@ -431,6 +447,11 @@ scan_volumes() {
         continue ;;
     esac
     [[ -d "$vol/System" ]] && continue   # boot-volume firmlink safety net
+    # Honour user-defined blacklist from config.
+    if should_ignore_volume "$(basename "$vol")"; then
+      log "Ignoring $vol (matched should_ignore_volume)"
+      continue
+    fi
     import_volume "$vol"
   done
 }
