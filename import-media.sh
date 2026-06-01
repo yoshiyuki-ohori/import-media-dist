@@ -504,5 +504,16 @@ scan_downloads() {
 
 # ---------- Main ----------
 sleep 2
+# Forced manual import on a single volume (set by import-now.sh).
+# Bypasses should_ignore_volume so blacklisted drives can still be imported on demand.
+if [[ -n "${FORCE_VOLUME:-}" ]]; then
+  log "Forced manual import: $FORCE_VOLUME"
+  if [[ -d "$FORCE_VOLUME" ]]; then
+    import_volume "$FORCE_VOLUME"
+  else
+    log "FORCE_VOLUME path missing: $FORCE_VOLUME"
+  fi
+  exit 0
+fi
 scan_volumes
 scan_downloads
