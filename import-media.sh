@@ -12,9 +12,19 @@ DOWNLOADS="$HOME/Downloads"
 LOG="$HOME/Library/Logs/import-media.log"
 LOCK_FILE="$HOME/Library/Caches/import-media.pid"
 
-# Default hook — overridable in config to blacklist specific volume names.
-# Return 0 to ignore the volume, 1 to import it.
-should_ignore_volume() { return 1; }
+# Default ignore-list check: reads ~/.config/import-media/ignore-volumes.txt
+# (one volume name per line, # for comments). config.sh can override this function
+# for more complex matching.
+should_ignore_volume() {
+  local ignore_file="$HOME/.config/import-media/ignore-volumes.txt"
+  [[ -f "$ignore_file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "${line:0:1}" == "#" ]] && continue
+    [[ "$1" == "$line" ]] && return 0
+  done < "$ignore_file"
+  return 1
+}
 
 # Destination override from the simple text file written by set-destination.sh.
 DEST_BASE_FILE="$HOME/.config/import-media/dest-base.txt"
