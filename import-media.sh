@@ -267,6 +267,8 @@ detect_source_from_file() {
 # ---------- Place a file into <SOURCE>/YYYY/YYYY-MM-DD/ ----------
 # Args: source-file, source-label, mode (copy|move)
 # Returns 0 if newly placed, 1 if skipped/duplicate.
+LAST_PLACED_DEST=""
+
 place_file() {
   local f="$1" source="$2" mode="$3"
   local date_str year raw device dest_dir dest
@@ -280,6 +282,7 @@ place_file() {
     dest_dir="$DEST_BASE/$source/$year/$date_str/$device"
   fi
   dest="$dest_dir/$(basename "$f")"
+  LAST_PLACED_DEST="$dest"
   mkdir -p "$dest_dir"
 
   # Already imported — handle source cleanup if requested.
@@ -423,6 +426,20 @@ import_volume() {
   local copied=0 scanned=0 last_source=""
   local volname
   volname=$(basename "$vol")
+
+  # Per-import-session manifest. Useful for "what did I import from this card?" lookups.
+  local manifest_dir="$HOME/Library/Logs/import-media-manifests"
+  mkdir -p "$manifest_dir"
+  local session_id
+  session_id="$(date '+%Y-%m-%d_%H%M%S')_$(echo "$volname" | tr -c '[:alnum:]._-' '_')_${label}"
+  local manifest_file="$manifest_dir/${session_id}.tsv"
+  {
+    printf '# Session : %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf '# Volume  : %s\n' "$vol"
+    printf '# Source  : %s\n' "$label"
+    printf '# Total   : %s files on card\n' "$total"
+    printf 'src\tdst\n'
+  } > "$manifest_file"
   while IFS= read -r -d '' f; do
     scanned=$((scanned + 1))
     # Use the volume hint if known, else detect per-file from MP4 metadata / filename.
@@ -437,6 +454,8 @@ import_volume() {
     if place_file "$f" "$source" "copy"; then
       copied=$((copied + 1))
       last_source="$source"
+      # place_file sets LAST_PLACED_DEST to the destination path on success.
+      printf '%s\t%s\n' "$f" "$LAST_PLACED_DEST" >> "$manifest_file"
     fi
     # Progress ping every 5 scanned files (silent, no completion sound).
     if [[ $((scanned % 5)) -eq 0 ]] && [[ $scanned -lt $total ]]; then
