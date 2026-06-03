@@ -479,28 +479,44 @@ detect_volume_source() {
 }
 
 # Lists all importable media files on a volume.
+# Honors FILE_FILTER: "mp4_only" (MP4/MOV/M4V) or "all" (everything DJI/GoPro/iPhone emits).
 # Uses DCIM/ if present (full depth), else scans the volume root up to maxdepth 6.
 find_volume_media() {
   local vol="$1"
   shift
+  local filter="${FILE_FILTER:-mp4_only}"
   if [[ -d "$vol/DCIM" ]]; then
-    /usr/bin/find "$vol/DCIM" -type f \
-      ! -name '._*' ! -name '.DS_Store' \( \
-        -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
-        -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
-        -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
-        -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
-        -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
-      \) "$@" 2>/dev/null
+    if [[ "$filter" == "mp4_only" ]]; then
+      /usr/bin/find "$vol/DCIM" -type f \
+        ! -name '._*' ! -name '.DS_Store' \( \
+          -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' \
+        \) "$@" 2>/dev/null
+    else
+      /usr/bin/find "$vol/DCIM" -type f \
+        ! -name '._*' ! -name '.DS_Store' \( \
+          -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
+          -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
+          -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
+          -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
+          -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
+        \) "$@" 2>/dev/null
+    fi
   else
-    /usr/bin/find "$vol" -maxdepth 6 -type f \
-      ! -name '._*' ! -name '.DS_Store' \( \
-        -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
-        -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
-        -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
-        -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
-        -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
-      \) "$@" 2>/dev/null
+    if [[ "$filter" == "mp4_only" ]]; then
+      /usr/bin/find "$vol" -maxdepth 6 -type f \
+        ! -name '._*' ! -name '.DS_Store' \( \
+          -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' \
+        \) "$@" 2>/dev/null
+    else
+      /usr/bin/find "$vol" -maxdepth 6 -type f \
+        ! -name '._*' ! -name '.DS_Store' \( \
+          -iname '*.MP4' -o -iname '*.MOV' -o -iname '*.M4V' -o -iname '*.LRV' \
+          -o -iname '*.THM' -o -iname '*.JPG' -o -iname '*.WAV' \
+          -o -iname '*.INSV' -o -iname '*.DNG' -o -iname '*.RAW' \
+          -o -iname '*.AVI' -o -iname '*.MKV' -o -iname '*.MTS' \
+          -o -iname '*.M2TS' -o -iname '*.WMV' -o -iname '*.HEIC' \
+        \) "$@" 2>/dev/null
+    fi
   fi
 }
 
