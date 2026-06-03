@@ -172,12 +172,28 @@ build_line_message() {
 ${shown}"
   fi
 
+  # Build Drive folder links for each shooting-date that received files this session.
+  local link_lines=""
+  while IFS= read -r date_str; do
+    [[ -z "$date_str" ]] && continue
+    local date_dir="$DEST_BASE/$date_str"
+    [[ -d "$date_dir" ]] || continue
+    local folder_id
+    folder_id=$(/usr/bin/xattr -p "com.google.drivefs.item-id#S" "$date_dir" 2>/dev/null || true)
+    if [[ -n "$folder_id" ]]; then
+      link_lines="${link_lines}
+${date_str}: https://drive.google.com/drive/folders/${folder_id}"
+    fi
+  done <<< "$dates"
+
   body="${status_icon} ${label}
 件数: ${copied} 件
 撮影日: ${date_summary}
 機種: ${devices}
 ${err_lines}
-完了しました"
+完了しました${link_lines:+
+
+📂 フォルダ:${link_lines}}"
   printf '%s' "$body"
 }
 
@@ -402,7 +418,7 @@ LAST_PLACED_DEVICE=""
 
 place_file() {
   local f="$1" source="$2" mode="$3"
-  local date_str raw device dest_dir dest
+  local date_str raw device dest_dir dest original_base today existing
   date_str=$(get_creation_date "$f")
   if [[ "$source" == "Other" ]]; then
     device="$source"
@@ -413,30 +429,38 @@ place_file() {
     # so the LINE notification can still report something useful.
     [[ "$device" == "Unknown" ]] && device="$source"
   fi
-  # Flattest layout: <YYYY-MM-DD>/<file>  (source/device kept only as metadata
-  # for the LINE notification and manifest; folder tree shows pure dates).
-  dest_dir="$DEST_BASE/$date_str"
-  dest="$dest_dir/$(basename "$f")"
-  LAST_PLACED_DEST="$dest"
   LAST_PLACED_DEVICE="$device"
+  # Flattest layout: <YYYY-MM-DD>/<import-date>_<file>
+  dest_dir="$DEST_BASE/$date_str"
   mkdir -p "$dest_dir"
+  original_base=$(basename "$f")
+  today=$(date +%Y-%m-%d)
 
-  # Already imported — handle source cleanup if requested.
-  if [[ -e "$dest" ]] && \
-     [[ "$(/usr/bin/stat -f %z "$f")" == "$(/usr/bin/stat -f %z "$dest")" ]]; then
+  # Look for an already-imported copy (with or without import-date prefix).
+  existing=$(/usr/bin/find "$dest_dir" -maxdepth 1 -type f \
+      \( -name "$original_base" -o -name "????-??-??_${original_base}" \) \
+      2>/dev/null | /usr/bin/head -1)
+
+  if [[ -n "$existing" ]] && \
+     [[ "$(/usr/bin/stat -f %z "$f")" == "$(/usr/bin/stat -f %z "$existing")" ]]; then
+    LAST_PLACED_DEST="$existing"
     if [[ "$mode" == "move" ]]; then
       /bin/rm -f "$f"
-      log "  = [$source] dup removed from source: $(basename "$f")"
+      log "  = [$source] dup removed from source: $original_base"
     elif [[ "$mode" == "copy" && "$DELETE_FROM_CARD" == "true" ]]; then
-      if verify_copy "$f" "$dest"; then
+      if verify_copy "$f" "$existing"; then
         /bin/rm -f "$f"
-        log "  = [$source] already imported, removed from card: $(basename "$f")"
+        log "  = [$source] already imported, removed from card: $original_base"
       else
-        log "  ! [$source] dup but verify failed, KEEPING source: $(basename "$f")"
+        log "  ! [$source] dup but verify failed, KEEPING source: $original_base"
       fi
     fi
     return 1
   fi
+
+  # New file: prefix with today's import date.
+  dest="$dest_dir/${today}_${original_base}"
+  LAST_PLACED_DEST="$dest"
 
   if [[ "$mode" == "move" ]]; then
     if /bin/mv -n "$f" "$dest" 2>/dev/null && [[ -e "$dest" ]]; then
