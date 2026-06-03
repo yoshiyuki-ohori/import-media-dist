@@ -552,6 +552,10 @@ import_volume() {
   if ! ask_user_to_import "$(basename "$vol")" "$label" "$total"; then
     log "User cancelled: $vol"
     notify "$label $(basename "$vol")" "スキップ（ユーザー操作）"
+    notify_line "🚫 ${label} ($(basename "$vol"))
+ユーザーがスキップしました
+${total} 件のファイルがありましたが取り込みは行われません
+完了しました"
     # Remember the rejection so we don't keep nagging while this volume is unchanged.
     echo "$current_sig" > "$sig_file"
     return
@@ -635,6 +639,10 @@ import_volume() {
     notify_line "$line_msg"
   else
     notify "$label $(basename "$vol")" "新規なし (既存 $scanned 件すべてスキップ)"
+    notify_line "ℹ️ ${label} ($(basename "$vol"))
+件数: 0 件 (新規なし)
+既存 ${scanned} 件はすべて取り込み済み
+完了しました"
   fi
 }
 
