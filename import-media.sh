@@ -89,6 +89,34 @@ open_in_finder() {
   /usr/bin/open "$1" >/dev/null 2>&1 || true
 }
 
+# Fire-and-forget LINE notification via the team's ops-hub-line-bot service.
+# Failures are swallowed and logged — never block the import.
+notify_line() {
+  local msg="$1"
+  if [[ -x "$HOME/bin/notify-line.sh" ]]; then
+    "$HOME/bin/notify-line.sh" "$msg" >>"$LOG" 2>&1 || log "LINE notify failed (non-fatal): $msg"
+  fi
+}
+
+# Format bytes as human-readable string (KB/MB/GB).
+human_bytes() {
+  /usr/bin/awk -v b="${1:-0}" 'BEGIN {
+    if (b < 1024) printf "%dB", b
+    else if (b < 1048576) printf "%.1fKB", b/1024
+    else if (b < 1073741824) printf "%.1fMB", b/1048576
+    else printf "%.2fGB", b/1073741824
+  }'
+}
+
+# Format seconds as "Xh Ym Zs" or similar.
+human_elapsed() {
+  local s="${1:-0}"
+  if [[ $s -lt 60 ]]; then printf '%d秒' "$s"
+  elif [[ $s -lt 3600 ]]; then printf '%d分%d秒' $((s/60)) $((s%60))
+  else printf '%d時間%d分' $((s/3600)) $((s/60%60))
+  fi
+}
+
 VOL_SIG_DIR="$HOME/Library/Caches/import-media-vols"
 
 # Per-volume signature so we can skip already-processed volumes silently.
@@ -388,6 +416,8 @@ import_volume() {
   [[ $total -eq 0 ]] && return
 
   local label="${source_hint:-SDカード}"
+  local start_ts
+  start_ts=$(date +%s)
   log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
 
   # Suppress repeat dialogs while the volume's contents haven't changed.
@@ -468,9 +498,23 @@ import_volume() {
   # The signature changes if files are added, removed, or the card is remounted.
   echo "$current_sig" > "$sig_file"
 
+  # Tally copied bytes by reading destination sizes from the manifest we just wrote.
+  local copied_bytes=0 dst_path
+  while IFS=$'\t' read -r _src_path dst_path; do
+    [[ -z "$dst_path" || "${_src_path:0:1}" == "#" || "$_src_path" == "src" ]] && continue
+    if [[ -f "$dst_path" ]]; then
+      copied_bytes=$((copied_bytes + $(/usr/bin/stat -f %z "$dst_path" 2>/dev/null || echo 0)))
+    fi
+  done < "$manifest_file"
+  local elapsed=$(( $(date +%s) - start_ts ))
+  local size_str elapsed_str
+  size_str=$(human_bytes "$copied_bytes")
+  elapsed_str=$(human_elapsed "$elapsed")
+
   if [[ $copied -gt 0 ]]; then
     notify_done "$label ($(basename "$vol"))" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
     open_in_finder "$DEST_BASE/${source_hint:-$last_source}"
+    notify_line "✅ ${label} 取り込み完了: ${copied}ファイル / ${size_str} / ${elapsed_str} (from $(basename "$vol"))"
   else
     notify "$label $(basename "$vol")" "新規なし (既存 $scanned 件すべてスキップ)"
   fi
@@ -505,19 +549,24 @@ is_settled() {
 
 scan_downloads() {
   [[ -d "$DOWNLOADS" ]] || return
-  local placed=0 last_dest=""
+  local placed=0 last_dest="" placed_bytes=0
+  local start_ts
+  start_ts=$(date +%s)
   while IFS= read -r -d '' f; do
     case "$f" in
       *.crdownload|*.download|*.part) continue ;;
     esac
     [[ "$(basename "$f")" == ._* ]] && continue
     is_settled "$f" || { log "skip (still writing): $f"; continue; }
-    local source
+    local source size
     source=$(detect_source_from_file "$f")
     # Files from Downloads with no detectable device → label them "Downloads" instead of "Other".
     [[ "$source" == "Other" ]] && source="Downloads"
+    # Grab size BEFORE the move (post-move the file is gone from $f).
+    size=$(/usr/bin/stat -f %z "$f" 2>/dev/null || echo 0)
     if place_file "$f" "$source" "move"; then
       placed=$((placed + 1))
+      placed_bytes=$((placed_bytes + size))
       last_dest="$DEST_BASE/$source"
     fi
   done < <(/usr/bin/find "$DOWNLOADS" -maxdepth 2 -type f ! -name '._*' \( \
@@ -525,9 +574,11 @@ scan_downloads() {
         -o -iname '*.insv' -o -iname '*.lrv' \
       \) -print0 2>/dev/null)
   if [[ $placed -gt 0 ]]; then
+    local elapsed=$(( $(date +%s) - start_ts ))
     log "<== Downloads done: $placed moved"
     notify_done "Downloads → Movies" "$placed 件を移動"
     [[ -n "$last_dest" ]] && open_in_finder "$last_dest"
+    notify_line "✅ Downloads 取り込み完了: ${placed}ファイル / $(human_bytes "$placed_bytes") / $(human_elapsed "$elapsed")"
   fi
 }
 
