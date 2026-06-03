@@ -76,6 +76,10 @@ fi
 echo $$ > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT INT TERM
 
+# Prevent idle sleep while this run is in progress.
+# caffeinate auto-exits when our PID exits (the -w flag), so no cleanup needed.
+/usr/bin/caffeinate -i -w $$ </dev/null >/dev/null 2>&1 &
+
 notify() {
   /usr/bin/osascript -e "display notification \"$2\" with title \"Media Import\" subtitle \"$1\" sound name \"Tink\"" >/dev/null 2>&1 || true
 }
