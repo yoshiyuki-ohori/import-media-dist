@@ -144,11 +144,9 @@ build_line_message() {
     date_summary="$(echo "$dates" | /usr/bin/head -1) 〜 $(echo "$dates" | /usr/bin/tail -1)"
   fi
 
-  # Extract unique device folder names (the segment after the date folder in destination paths).
+  # Extract unique device names from the manifest's 3rd column.
   devices=$(/usr/bin/grep -v '^#\|^src	' "$manifest" 2>/dev/null \
-    | /usr/bin/awk -F'\t' '{print $2}' \
-    | /usr/bin/sed -E 's|.*/20[0-9]{2}-[0-9]{2}-[0-9]{2}/([^/]+)/.*|\1|' \
-    | /usr/bin/grep -v '/' \
+    | /usr/bin/awk -F'\t' '$3 != "" {print $3}' \
     | /usr/bin/sort -u \
     | /usr/bin/paste -sd ', ' -)
   [[ -z "$devices" ]] && devices="(なし)"
@@ -389,23 +387,27 @@ detect_source_from_file() {
 # Args: source-file, source-label, mode (copy|move)
 # Returns 0 if newly placed, 1 if skipped/duplicate.
 LAST_PLACED_DEST=""
+LAST_PLACED_DEVICE=""
 
 place_file() {
   local f="$1" source="$2" mode="$3"
   local date_str raw device dest_dir dest
   date_str=$(get_creation_date "$f")
   if [[ "$source" == "Other" ]]; then
-    dest_dir="$DEST_BASE/$source/$date_str"
+    device="$source"
   else
     raw=$(detect_device_raw "$f" "$source")
     device=$(device_folder_name "$source" "$raw")
-    # When device can't be identified, fall back to the source name itself
-    # (avoids the noisy "Unknown" folder).
+    # When the device model can't be identified, fall back to the source name
+    # so the LINE notification can still report something useful.
     [[ "$device" == "Unknown" ]] && device="$source"
-    dest_dir="$DEST_BASE/$source/$date_str/$device"
   fi
+  # Flat layout: <Source>/<YYYY-MM-DD>/<file>  (device is kept only in metadata
+  # for the LINE notification, not in the folder tree).
+  dest_dir="$DEST_BASE/$source/$date_str"
   dest="$dest_dir/$(basename "$f")"
   LAST_PLACED_DEST="$dest"
+  LAST_PLACED_DEVICE="$device"
   mkdir -p "$dest_dir"
 
   # Already imported — handle source cleanup if requested.
@@ -583,7 +585,7 @@ import_volume() {
     printf '# Volume  : %s\n' "$vol"
     printf '# Source  : %s\n' "$label"
     printf '# Total   : %s files on card\n' "$total"
-    printf 'src\tdst\n'
+    printf 'src\tdst\tdevice\n'
   } > "$manifest_file"
   while IFS= read -r -d '' f; do
     scanned=$((scanned + 1))
@@ -599,8 +601,8 @@ import_volume() {
     if place_file "$f" "$source" "copy"; then
       copied=$((copied + 1))
       last_source="$source"
-      # place_file sets LAST_PLACED_DEST to the destination path on success.
-      printf '%s\t%s\n' "$f" "$LAST_PLACED_DEST" >> "$manifest_file"
+      # place_file sets LAST_PLACED_DEST + LAST_PLACED_DEVICE on success.
+      printf '%s\t%s\t%s\n' "$f" "$LAST_PLACED_DEST" "$LAST_PLACED_DEVICE" >> "$manifest_file"
     fi
     # Progress ping every 5 scanned files (silent, no completion sound).
     if [[ $((scanned % 5)) -eq 0 ]] && [[ $scanned -lt $total ]]; then
@@ -679,7 +681,7 @@ scan_downloads() {
     printf '# Session : %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf '# Volume  : %s\n' "$DOWNLOADS"
     printf '# Source  : Downloads\n'
-    printf 'src\tdst\n'
+    printf 'src\tdst\tdevice\n'
   } > "$dl_manifest"
   while IFS= read -r -d '' f; do
     case "$f" in
@@ -697,7 +699,7 @@ scan_downloads() {
       placed=$((placed + 1))
       placed_bytes=$((placed_bytes + size))
       last_dest="$DEST_BASE/$source"
-      printf '%s\t%s\n' "$f" "$LAST_PLACED_DEST" >> "$dl_manifest"
+      printf '%s\t%s\t%s\n' "$f" "$LAST_PLACED_DEST" "$LAST_PLACED_DEVICE" >> "$dl_manifest"
     fi
   done < <(/usr/bin/find "$DOWNLOADS" -maxdepth 2 -type f ! -name '._*' \( \
         -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4v' \
