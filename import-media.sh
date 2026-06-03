@@ -186,22 +186,19 @@ cleanup_old_folders() {
   [[ -d "$DEST_BASE" ]] || return 0
   local today_epoch removed=0
   today_epoch=$(/bin/date +%s)
-  for source_dir in "$DEST_BASE"/*/; do
-    [[ -d "$source_dir" ]] || continue
-    for date_dir in "$source_dir"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/; do
-      [[ -d "$date_dir" ]] || continue
-      local date_name dir_epoch age_days
-      date_name=$(/usr/bin/basename "$date_dir")
-      dir_epoch=$(/bin/date -j -f "%Y-%m-%d" "$date_name" "+%s" 2>/dev/null || true)
-      [[ -z "$dir_epoch" ]] && continue
-      age_days=$(( (today_epoch - dir_epoch) / 86400 ))
-      if (( age_days > RETENTION_DAYS )); then
-        /bin/rm -rf "$date_dir" 2>/dev/null && {
-          log "Cleanup: removed $date_dir (age=${age_days}d)"
-          removed=$((removed + 1))
-        }
-      fi
-    done
+  for date_dir in "$DEST_BASE"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/; do
+    [[ -d "$date_dir" ]] || continue
+    local date_name dir_epoch age_days
+    date_name=$(/usr/bin/basename "$date_dir")
+    dir_epoch=$(/bin/date -j -f "%Y-%m-%d" "$date_name" "+%s" 2>/dev/null || true)
+    [[ -z "$dir_epoch" ]] && continue
+    age_days=$(( (today_epoch - dir_epoch) / 86400 ))
+    if (( age_days > RETENTION_DAYS )); then
+      /bin/rm -rf "$date_dir" 2>/dev/null && {
+        log "Cleanup: removed $date_dir (age=${age_days}d)"
+        removed=$((removed + 1))
+      }
+    fi
   done
   if (( removed > 0 )); then
     log "Cleanup done: $removed date-folders older than ${RETENTION_DAYS}d removed"
@@ -402,9 +399,9 @@ place_file() {
     # so the LINE notification can still report something useful.
     [[ "$device" == "Unknown" ]] && device="$source"
   fi
-  # Flat layout: <Source>/<YYYY-MM-DD>/<file>  (device is kept only in metadata
-  # for the LINE notification, not in the folder tree).
-  dest_dir="$DEST_BASE/$source/$date_str"
+  # Flattest layout: <YYYY-MM-DD>/<file>  (source/device kept only as metadata
+  # for the LINE notification and manifest; folder tree shows pure dates).
+  dest_dir="$DEST_BASE/$date_str"
   dest="$dest_dir/$(basename "$f")"
   LAST_PLACED_DEST="$dest"
   LAST_PLACED_DEVICE="$device"
