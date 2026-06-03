@@ -54,7 +54,13 @@ DELETE_FROM_CARD="false"         # "true" or "false"
 #   hash  — full SHA-256 compare on both sides. Bulletproof but slow (~2-3 min per 17GB file).
 #   none  — trust rsync's exit code only. Fastest, least paranoid.
 VERIFY_MODE="size"
+# Date folders older than this many days are auto-deleted at end of each run.
+# Set to 0 to disable cleanup.
+RETENTION_DAYS=30
 # =======================
+
+# Per-session failure tracker (basenames of files that failed during this run).
+SESSION_FAILURES=()
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
 
@@ -114,6 +120,97 @@ human_elapsed() {
   if [[ $s -lt 60 ]]; then printf '%d秒' "$s"
   elif [[ $s -lt 3600 ]]; then printf '%d分%d秒' $((s/60)) $((s%60))
   else printf '%d時間%d分' $((s/3600)) $((s/60%60))
+  fi
+}
+
+# Compose the LINE notification body for one completed session.
+# Args: source-label, copied-count, manifest-file-path
+build_line_message() {
+  local label="$1" copied="$2" manifest="$3"
+  local dates devices date_summary device_summary status_icon body err_lines
+  local fail_count=${#SESSION_FAILURES[@]}
+
+  # Extract unique YYYY-MM-DD shooting dates from manifest destination paths.
+  dates=$(/usr/bin/grep -v '^#\|^src	' "$manifest" 2>/dev/null \
+    | /usr/bin/awk -F'\t' '{print $2}' \
+    | /usr/bin/grep -oE '20[0-9]{2}-[0-9]{2}-[0-9]{2}' \
+    | /usr/bin/sort -u)
+
+  if [[ -z "$dates" ]]; then
+    date_summary="(不明)"
+  elif [[ $(echo "$dates" | /usr/bin/wc -l | /usr/bin/tr -d ' ') -le 1 ]]; then
+    date_summary="$dates"
+  else
+    date_summary="$(echo "$dates" | /usr/bin/head -1) 〜 $(echo "$dates" | /usr/bin/tail -1)"
+  fi
+
+  # Extract unique device folder names (the segment after the date folder in destination paths).
+  devices=$(/usr/bin/grep -v '^#\|^src	' "$manifest" 2>/dev/null \
+    | /usr/bin/awk -F'\t' '{print $2}' \
+    | /usr/bin/sed -E 's|.*/20[0-9]{2}-[0-9]{2}-[0-9]{2}/([^/]+)/.*|\1|' \
+    | /usr/bin/grep -v '/' \
+    | /usr/bin/sort -u \
+    | /usr/bin/paste -sd ', ' -)
+  [[ -z "$devices" ]] && devices="(なし)"
+
+  if (( fail_count == 0 )); then
+    status_icon="✅"
+    err_lines="全件成功"
+  else
+    status_icon="⚠️"
+    # Show up to 3 failure entries inline; summarize the rest.
+    local shown extra
+    if (( fail_count <= 3 )); then
+      shown=$(printf '%s\n' "${SESSION_FAILURES[@]}")
+    else
+      shown=$(printf '%s\n' "${SESSION_FAILURES[@]:0:3}")
+      extra=" ほか$((fail_count - 3))件"
+    fi
+    err_lines="エラー: ${fail_count}件失敗${extra:-}
+${shown}"
+  fi
+
+  body="${status_icon} ${label}
+件数: ${copied} 件
+撮影日: ${date_summary}
+機種: ${devices}
+${err_lines}
+完了しました"
+  printf '%s' "$body"
+}
+
+# Auto-delete date folders older than RETENTION_DAYS from the destination.
+# Source / year folders are kept; only YYYY-MM-DD subfolders are removed.
+# In Drive (streaming mode) this moves files to Drive Trash for ~30 day buffer.
+cleanup_old_folders() {
+  [[ "$RETENTION_DAYS" -gt 0 ]] || return 0
+  [[ -d "$DEST_BASE" ]] || return 0
+  local today_epoch removed=0
+  today_epoch=$(/bin/date +%s)
+  for source_dir in "$DEST_BASE"/*/; do
+    [[ -d "$source_dir" ]] || continue
+    for year_dir in "$source_dir"[0-9][0-9][0-9][0-9]/; do
+      [[ -d "$year_dir" ]] || continue
+      for date_dir in "$year_dir"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/; do
+        [[ -d "$date_dir" ]] || continue
+        local date_name dir_epoch age_days
+        date_name=$(/usr/bin/basename "$date_dir")
+        dir_epoch=$(/bin/date -j -f "%Y-%m-%d" "$date_name" "+%s" 2>/dev/null || true)
+        [[ -z "$dir_epoch" ]] && continue
+        age_days=$(( (today_epoch - dir_epoch) / 86400 ))
+        if (( age_days > RETENTION_DAYS )); then
+          /bin/rm -rf "$date_dir" 2>/dev/null && {
+            log "Cleanup: removed $date_dir (age=${age_days}d)"
+            removed=$((removed + 1))
+          }
+        fi
+      done
+      # Drop now-empty year folder.
+      /bin/rmdir "$year_dir" 2>/dev/null || true
+    done
+  done
+  if (( removed > 0 )); then
+    log "Cleanup done: $removed date-folders older than ${RETENTION_DAYS}d removed"
   fi
 }
 
@@ -345,11 +442,13 @@ place_file() {
         log "  x [$source] source removed from card: $(basename "$f")"
       else
         log "  ! [$source] VERIFY FAILED — source kept on card: $(basename "$f")"
+        SESSION_FAILURES+=("$(basename "$f"): verify failed")
       fi
     fi
     return 0
   fi
   log "  ! failed: $f"
+  SESSION_FAILURES+=("$(basename "$f"): rsync failed")
   return 1
 }
 
@@ -418,6 +517,8 @@ import_volume() {
   local label="${source_hint:-SDカード}"
   local start_ts
   start_ts=$(date +%s)
+  # Reset failure tracker for this session.
+  SESSION_FAILURES=()
   log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
 
   # Suppress repeat dialogs while the volume's contents haven't changed.
@@ -514,7 +615,11 @@ import_volume() {
   if [[ $copied -gt 0 ]]; then
     notify_done "$label ($(basename "$vol"))" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
     open_in_finder "$DEST_BASE/${source_hint:-$last_source}"
-    notify_line "✅ ${label} 取り込み完了: ${copied}ファイル / ${size_str} / ${elapsed_str} (from $(basename "$vol"))"
+
+    # Build the LINE message: 件数 / 撮影日 / 機種 / エラー or 全件成功 / 完了しました
+    local line_msg
+    line_msg=$(build_line_message "$label" "$copied" "$manifest_file")
+    notify_line "$line_msg"
   else
     notify "$label $(basename "$vol")" "新規なし (既存 $scanned 件すべてスキップ)"
   fi
@@ -552,6 +657,16 @@ scan_downloads() {
   local placed=0 last_dest="" placed_bytes=0
   local start_ts
   start_ts=$(date +%s)
+  SESSION_FAILURES=()
+  # Mini manifest so build_line_message can reuse the same date/device parser.
+  local dl_manifest="$HOME/Library/Logs/import-media-manifests/$(date '+%Y-%m-%d_%H%M%S')_Downloads.tsv"
+  mkdir -p "$(dirname "$dl_manifest")"
+  {
+    printf '# Session : %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf '# Volume  : %s\n' "$DOWNLOADS"
+    printf '# Source  : Downloads\n'
+    printf 'src\tdst\n'
+  } > "$dl_manifest"
   while IFS= read -r -d '' f; do
     case "$f" in
       *.crdownload|*.download|*.part) continue ;;
@@ -568,17 +683,20 @@ scan_downloads() {
       placed=$((placed + 1))
       placed_bytes=$((placed_bytes + size))
       last_dest="$DEST_BASE/$source"
+      printf '%s\t%s\n' "$f" "$LAST_PLACED_DEST" >> "$dl_manifest"
     fi
   done < <(/usr/bin/find "$DOWNLOADS" -maxdepth 2 -type f ! -name '._*' \( \
         -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4v' \
         -o -iname '*.insv' -o -iname '*.lrv' \
       \) -print0 2>/dev/null)
   if [[ $placed -gt 0 ]]; then
-    local elapsed=$(( $(date +%s) - start_ts ))
     log "<== Downloads done: $placed moved"
     notify_done "Downloads → Movies" "$placed 件を移動"
     [[ -n "$last_dest" ]] && open_in_finder "$last_dest"
-    notify_line "✅ Downloads 取り込み完了: ${placed}ファイル / $(human_bytes "$placed_bytes") / $(human_elapsed "$elapsed")"
+    notify_line "$(build_line_message "Downloads" "$placed" "$dl_manifest")"
+  else
+    # No new files — discard the empty manifest.
+    /bin/rm -f "$dl_manifest"
   fi
 }
 
@@ -597,3 +715,4 @@ if [[ -n "${FORCE_VOLUME:-}" ]]; then
 fi
 scan_volumes
 scan_downloads
+cleanup_old_folders
