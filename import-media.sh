@@ -206,6 +206,16 @@ cleanup_old_folders() {
 }
 
 VOL_SIG_DIR="$HOME/Library/Caches/import-media-vols"
+VOLUMES_MTIME_FILE="$HOME/Library/Caches/import-media-volumes-mtime"
+
+# Track /Volumes mtime so we can tell apart "real mount events" (eject/insert)
+# from "Downloads noise" that happens to also fire the LaunchAgent.
+current_volumes_mtime=$(/usr/bin/stat -f %m /Volumes 2>/dev/null || echo 0)
+prev_volumes_mtime=$(/bin/cat "$VOLUMES_MTIME_FILE" 2>/dev/null || echo 0)
+VOLUMES_CHANGED=0
+if [[ "$current_volumes_mtime" != "$prev_volumes_mtime" ]]; then
+  VOLUMES_CHANGED=1
+fi
 
 # Per-volume signature so we can skip already-processed volumes silently.
 # Combines: device path + file count + newest mtime. Any change triggers a re-prompt.
@@ -534,16 +544,17 @@ import_volume() {
   SESSION_FAILURES=()
   log "==> Volume $vol (hint: ${source_hint:-generic}), $total files"
 
-  # Suppress repeat dialogs while the volume's contents haven't changed.
-  # If the signature matches our cached value, this volume is already up-to-date
-  # — silently exit instead of bothering the user again.
+  # Suppress repeat dialogs only when /Volumes itself hasn't changed
+  # (i.e. this run was triggered by ~/Downloads activity, not an actual mount event).
+  # When the user really inserts/ejects, /Volumes mtime changes — we want the dialog
+  # to fire even if file content happens to look identical.
   mkdir -p "$VOL_SIG_DIR"
   local sig_file current_sig saved_sig
   sig_file=$(vol_sig_file "$vol")
   current_sig=$(get_volume_signature "$vol")
   saved_sig=$(/bin/cat "$sig_file" 2>/dev/null || echo "")
-  if [[ -n "$saved_sig" && "$current_sig" == "$saved_sig" ]]; then
-    log "    unchanged since last scan, skipping (sig: $current_sig)"
+  if [[ $VOLUMES_CHANGED -eq 0 && -n "$saved_sig" && "$current_sig" == "$saved_sig" ]]; then
+    log "    unchanged since last scan and no mount event, skipping silently (sig: $current_sig)"
     return
   fi
 
@@ -737,3 +748,6 @@ fi
 scan_volumes
 scan_downloads
 cleanup_old_folders
+
+# Remember /Volumes mtime so the next run can tell whether a real mount event occurred.
+echo "$current_volumes_mtime" > "$VOLUMES_MTIME_FILE"
