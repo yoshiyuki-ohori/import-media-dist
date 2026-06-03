@@ -180,7 +180,8 @@ ${err_lines}
 }
 
 # Auto-delete date folders older than RETENTION_DAYS from the destination.
-# Source / year folders are kept; only YYYY-MM-DD subfolders are removed.
+# Folder layout: <Source>/<YYYY-MM-DD>/<Device>/files
+# Only YYYY-MM-DD subfolders are removed; source folders are preserved.
 # In Drive (streaming mode) this moves files to Drive Trash for ~30 day buffer.
 cleanup_old_folders() {
   [[ "$RETENTION_DAYS" -gt 0 ]] || return 0
@@ -189,24 +190,19 @@ cleanup_old_folders() {
   today_epoch=$(/bin/date +%s)
   for source_dir in "$DEST_BASE"/*/; do
     [[ -d "$source_dir" ]] || continue
-    for year_dir in "$source_dir"[0-9][0-9][0-9][0-9]/; do
-      [[ -d "$year_dir" ]] || continue
-      for date_dir in "$year_dir"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/; do
-        [[ -d "$date_dir" ]] || continue
-        local date_name dir_epoch age_days
-        date_name=$(/usr/bin/basename "$date_dir")
-        dir_epoch=$(/bin/date -j -f "%Y-%m-%d" "$date_name" "+%s" 2>/dev/null || true)
-        [[ -z "$dir_epoch" ]] && continue
-        age_days=$(( (today_epoch - dir_epoch) / 86400 ))
-        if (( age_days > RETENTION_DAYS )); then
-          /bin/rm -rf "$date_dir" 2>/dev/null && {
-            log "Cleanup: removed $date_dir (age=${age_days}d)"
-            removed=$((removed + 1))
-          }
-        fi
-      done
-      # Drop now-empty year folder.
-      /bin/rmdir "$year_dir" 2>/dev/null || true
+    for date_dir in "$source_dir"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/; do
+      [[ -d "$date_dir" ]] || continue
+      local date_name dir_epoch age_days
+      date_name=$(/usr/bin/basename "$date_dir")
+      dir_epoch=$(/bin/date -j -f "%Y-%m-%d" "$date_name" "+%s" 2>/dev/null || true)
+      [[ -z "$dir_epoch" ]] && continue
+      age_days=$(( (today_epoch - dir_epoch) / 86400 ))
+      if (( age_days > RETENTION_DAYS )); then
+        /bin/rm -rf "$date_dir" 2>/dev/null && {
+          log "Cleanup: removed $date_dir (age=${age_days}d)"
+          removed=$((removed + 1))
+        }
+      fi
     done
   done
   if (( removed > 0 )); then
@@ -396,15 +392,17 @@ LAST_PLACED_DEST=""
 
 place_file() {
   local f="$1" source="$2" mode="$3"
-  local date_str year raw device dest_dir dest
+  local date_str raw device dest_dir dest
   date_str=$(get_creation_date "$f")
-  year="${date_str:0:4}"
   if [[ "$source" == "Other" ]]; then
-    dest_dir="$DEST_BASE/$source/$year/$date_str"
+    dest_dir="$DEST_BASE/$source/$date_str"
   else
     raw=$(detect_device_raw "$f" "$source")
     device=$(device_folder_name "$source" "$raw")
-    dest_dir="$DEST_BASE/$source/$year/$date_str/$device"
+    # When device can't be identified, fall back to the source name itself
+    # (avoids the noisy "Unknown" folder).
+    [[ "$device" == "Unknown" ]] && device="$source"
+    dest_dir="$DEST_BASE/$source/$date_str/$device"
   fi
   dest="$dest_dir/$(basename "$f")"
   LAST_PLACED_DEST="$dest"
