@@ -27,9 +27,6 @@ IMPORT_PLIST="$LA_DIR/com.user.importmedia.plist"
 UPDATE_PLIST="$LA_DIR/com.user.importmedia.update.plist"
 
 mkdir -p "$LA_DIR" "$LOG_DIR" "$MOVIES_DIR" "$APP_BUNDLE/Contents/MacOS"
-# Pre-create source folders so the structure is visible in Finder from day one,
-# even before the first import.
-mkdir -p "$MOVIES_DIR/DJI" "$MOVIES_DIR/GoPro" "$MOVIES_DIR/iPhone" "$MOVIES_DIR/Downloads"
 chmod +x "$INSTALL_DIR"/*.sh
 
 # Per-user config (lives outside the repo, survives git pull updates).
