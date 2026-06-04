@@ -172,28 +172,21 @@ build_line_message() {
 ${shown}"
   fi
 
-  # Build Drive folder links for each shooting-date that received files this session.
-  local link_lines=""
-  while IFS= read -r date_str; do
-    [[ -z "$date_str" ]] && continue
-    local date_dir="$DEST_BASE/$date_str"
-    [[ -d "$date_dir" ]] || continue
-    local folder_id
-    folder_id=$(/usr/bin/xattr -p "com.google.drivefs.item-id#S" "$date_dir" 2>/dev/null || true)
-    if [[ -n "$folder_id" ]]; then
-      link_lines="${link_lines}
-${date_str}: https://drive.google.com/drive/folders/${folder_id}"
-    fi
-  done <<< "$dates"
+  # One Drive link pointing at the destination root (e.g. the shared drive).
+  local link_line=""
+  local root_id
+  root_id=$(/usr/bin/xattr -p "com.google.drivefs.item-id#S" "$DEST_BASE" 2>/dev/null || true)
+  if [[ -n "$root_id" ]]; then
+    link_line="
+📂 https://drive.google.com/drive/folders/${root_id}"
+  fi
 
   body="${status_icon} ${label}
 件数: ${copied} 件
 撮影日: ${date_summary}
 機種: ${devices}
 ${err_lines}
-完了しました${link_lines:+
-
-📂 フォルダ:${link_lines}}"
+完了しました${link_line}"
   printf '%s' "$body"
 }
 
