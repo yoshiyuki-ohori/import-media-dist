@@ -44,6 +44,11 @@ fi
 # Config.sh can still override DEST_BASE (advanced users).
 [[ -n "${DEST_BASE_OVERRIDE:-}" ]] && DEST_BASE="$DEST_BASE_OVERRIDE"
 
+# Drive folder link shown in LINE notifications. Always points at this fixed
+# folder (not a per-date subfolder). config.sh may override; if cleared, we fall
+# back to the destination root's Drive item-id at runtime.
+DRIVE_FOLDER_URL="${DRIVE_FOLDER_URL:-https://drive.google.com/drive/folders/0AI5T4o7MXfRHUk9PVA}"
+
 mkdir -p "$DEST_BASE" "$(dirname "$LOG")" "$(dirname "$LOCK_FILE")"
 
 # ==== Configuration ====
@@ -172,13 +177,18 @@ build_line_message() {
 ${shown}"
   fi
 
-  # One Drive link pointing at the destination root (e.g. the shared drive).
-  local link_line=""
-  local root_id
-  root_id=$(/usr/bin/xattr -p "com.google.drivefs.item-id#S" "$DEST_BASE" 2>/dev/null || true)
-  if [[ -n "$root_id" ]]; then
+  # One fixed Drive link for the notification (never a per-date subfolder).
+  # Prefer the configured DRIVE_FOLDER_URL; fall back to the destination root's
+  # Drive item-id only if that is empty.
+  local link_line="" folder_url="${DRIVE_FOLDER_URL:-}"
+  if [[ -z "$folder_url" ]]; then
+    local root_id
+    root_id=$(/usr/bin/xattr -p "com.google.drivefs.item-id#S" "$DEST_BASE" 2>/dev/null || true)
+    [[ -n "$root_id" ]] && folder_url="https://drive.google.com/drive/folders/${root_id}"
+  fi
+  if [[ -n "$folder_url" ]]; then
     link_line="
-📂 https://drive.google.com/drive/folders/${root_id}"
+📂 ${folder_url}"
   fi
 
   body="${status_icon} ${label}
