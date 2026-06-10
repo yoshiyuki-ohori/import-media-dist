@@ -260,6 +260,9 @@ vol_sig_file() {
 # Returns 0 = approve (or no response within timeout), 1 = user cancelled.
 ask_user_to_import() {
   local volname="$1" label="$2" total="$3"
+  # Unattended / card-hub mode: skip the dialog and always import every
+  # recognized card. Enabled via AUTO_IMPORT="true" in config.sh.
+  [[ "${AUTO_IMPORT:-false}" == "true" ]] && return 0
   local result
   result=$(/usr/bin/osascript <<APPLESCRIPT 2>/dev/null
 display dialog "${volname} に取り込み可能なファイルが ${total} 件あります。
@@ -269,7 +272,10 @@ APPLESCRIPT
 )
   # Dialog couldn't be shown (e.g. no GUI session) → default to approve.
   [[ -z "$result" ]] && return 0
-  # If "取り込む" appears in the result (explicit click OR timeout default), approve.
+  # Timed out with no response (giving up) → import. This is the intended
+  # default so unattended / multi-card runs are never silently skipped.
+  [[ "$result" == *"gave up:true"* ]] && return 0
+  # Explicit "取り込む" click → approve.
   [[ "$result" == *"取り込む"* ]] && return 0
   return 1
 }

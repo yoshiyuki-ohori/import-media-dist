@@ -15,6 +15,7 @@ CURRENT_RETENTION="${RETENTION_DAYS:-30}"
 CURRENT_FILTER="${FILE_FILTER:-mp4_only}"
 CURRENT_DELETE="${DELETE_FROM_CARD:-false}"
 CURRENT_VERIFY="${VERIFY_MODE:-size}"
+CURRENT_AUTO="${AUTO_IMPORT:-false}"
 
 # Soma team defaults — applied via "リセット" menu choice.
 soma_defaults() {
@@ -22,10 +23,12 @@ soma_defaults() {
   CURRENT_FILTER="mp4_only"
   CURRENT_DELETE="false"
   CURRENT_VERIFY="size"
+  CURRENT_AUTO="false"
 }
 
 filter_label() { [[ "$1" == "mp4_only" ]] && echo "MP4のみ" || echo "すべて"; }
 delete_label() { [[ "$1" == "true" ]] && echo "削除する" || echo "残す"; }
+auto_label()   { [[ "$1" == "true" ]] && echo "ON（確認なしで全部取り込み）" || echo "OFF（確認ダイアログあり）"; }
 
 save_config() {
   cat > "$CONFIG_FILE" <<EOF
@@ -35,6 +38,7 @@ RETENTION_DAYS=$CURRENT_RETENTION
 FILE_FILTER="$CURRENT_FILTER"
 DELETE_FROM_CARD="$CURRENT_DELETE"
 VERIFY_MODE="$CURRENT_VERIFY"
+AUTO_IMPORT="$CURRENT_AUTO"
 EOF
   [[ -n "$CURRENT_DEST" ]] && printf '%s\n' "$CURRENT_DEST" > "$DEST_FILE"
 }
@@ -43,6 +47,7 @@ EOF
 while true; do
   fl=$(filter_label "$CURRENT_FILTER")
   dl=$(delete_label "$CURRENT_DELETE")
+  al=$(auto_label "$CURRENT_AUTO")
   dest_short="${CURRENT_DEST/#$HOME/~}"
 
   chosen=$(/usr/bin/osascript <<APPLESCRIPT 2>/dev/null
@@ -52,9 +57,10 @@ set theList to {¬
   "3. 自動削除期間 — ${CURRENT_RETENTION}日", ¬
   "4. SDカード側ファイル — $dl", ¬
   "5. コピー検証モード — $CURRENT_VERIFY", ¬
-  "6. 無視するメディアを管理", ¬
-  "7. 相馬チームのデフォルトに戻す", ¬
-  "8. 保存して閉じる"¬
+  "6. 自動取り込み（ハブ用） — $al", ¬
+  "7. 無視するメディアを管理", ¬
+  "8. 相馬チームのデフォルトに戻す", ¬
+  "9. 保存して閉じる"¬
 }
 set userChoice to (choose from list theList with prompt "設定したい項目を選んでください" with title "取り込みシステム設定" OK button name "編集" cancel button name "閉じる")
 if userChoice is false then return ""
@@ -103,6 +109,15 @@ A
       ;;
     "6. "*)
       pick=$(/usr/bin/osascript <<A 2>/dev/null
+set userChoice to (choose from list {"ON（確認なしで認識した全カードを自動取り込み・ハブ向け）", "OFF（カードごとに確認ダイアログを出す）"} with prompt "自動取り込みモード" with title "自動取り込み（ハブ用）")
+if userChoice is false then return ""
+return item 1 of userChoice as string
+A
+)
+      case "$pick" in ON*) CURRENT_AUTO="true" ;; OFF*) CURRENT_AUTO="false" ;; esac
+      ;;
+    "7. "*)
+      pick=$(/usr/bin/osascript <<A 2>/dev/null
 set userChoice to (choose from list {"無視するメディアを追加", "無視リストから削除"} with prompt "無視リスト管理" with title "メディア管理")
 if userChoice is false then return ""
 return item 1 of userChoice as string
@@ -113,11 +128,11 @@ A
         無視リストから削除) /bin/bash "$(/usr/bin/dirname "$0")/unignore-volume.sh" || true ;;
       esac
       ;;
-    "7. "*)
+    "8. "*)
       soma_defaults
       /usr/bin/osascript -e 'display notification "相馬チームのデフォルトに戻しました" with title "取り込みシステム" sound name "Glass"' >/dev/null 2>&1 || true
       ;;
-    "8. "*)
+    "9. "*)
       save_config
       /usr/bin/osascript -e 'display notification "設定を保存しました" with title "取り込みシステム" sound name "Glass"' >/dev/null 2>&1 || true
       break
