@@ -7,15 +7,22 @@
 # notification — so the team is pinged only when the videos are actually
 # available/playable in Drive, not merely copied to the local mount.
 #
+# If a session is still uploading after SLOW_AFTER (1h), send a one-time
+# "still uploading" heads-up but keep waiting for real completion. As a last
+# resort, give up after GIVEUP_AFTER (24h) with a failure notice so a stuck
+# upload neither swallows the notification nor lingers forever.
+#
 # Run every ~2 minutes by the com.user.importmedia.notify LaunchAgent.
 set -uo pipefail
 
 PENDING_DIR="$HOME/Library/Caches/import-media-pending"
 NOTIFY="$HOME/bin/notify-line.sh"
 LOG="$HOME/Library/Logs/import-media.log"
-MAX_WAIT=$(( 6 * 3600 ))   # after 6h, send anyway rather than never
+SLOW_AFTER=$(( 1 * 3600 ))    # 1h still uploading → one-time heads-up
+GIVEUP_AFTER=$(( 24 * 3600 )) # 24h → give up, notify failure, stop waiting
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+send() { "$NOTIFY" "$1" >> "$LOG" 2>&1 || log "notify-uploads: send failed"; }
 
 [[ -d "$PENDING_DIR" ]] || exit 0
 [[ -x "$NOTIFY" ]]      || exit 0
@@ -42,21 +49,27 @@ for pend in "$PENDING_DIR"/*.pending; do
     esac
   done < "$pend"
 
+  msg=$(/usr/bin/awk 'f{print} /^@message$/{f=1}' "$pend")
   now=$(date +%s)
   aged=$(( now - enqueued ))
 
   if [[ $pending -eq 0 ]]; then
-    msg=$(/usr/bin/awk 'f{print} /^@message$/{f=1}' "$pend")
-    "$NOTIFY" "$msg" >> "$LOG" 2>&1 || log "notify-uploads: send failed for $(basename "$pend")"
+    # All files are in the cloud → send the real completion notice.
+    send "$msg"
     log "notify-uploads: upload complete ($total files) → notified: $(basename "$pend")"
     /bin/rm -f "$pend"
-  elif [[ $aged -ge $MAX_WAIT ]]; then
-    msg=$(/usr/bin/awk 'f{print} /^@message$/{f=1}' "$pend")
-    "$NOTIFY" "$msg
+  elif [[ $aged -ge $GIVEUP_AFTER ]]; then
+    # Stuck for a full day → stop waiting, report failure.
+    send "$msg
 
-⚠️ 一部ファイルがまだアップロード中の可能性があります（未完了 ${pending}/${total} 件）" >> "$LOG" 2>&1 || true
-    log "notify-uploads: timed out after ${aged}s, notified anyway (${pending}/${total} pending): $(basename "$pend")"
+⚠️ アップロードが完了しませんでした（未完了 ${pending}/${total} 件）。Drive の同期状態を確認してください。"
+    log "notify-uploads: gave up after ${aged}s (${pending}/${total} pending): $(basename "$pend")"
     /bin/rm -f "$pend"
+  elif [[ $aged -ge $SLOW_AFTER ]] && ! /usr/bin/grep -q '^@slow_notified' "$pend"; then
+    # Taking a while → one-time heads-up, then keep waiting for completion.
+    send "⏳ アップロードに時間がかかっています（残り ${pending}/${total} 件）。完了したら改めてお知らせします。"
+    printf '@slow_notified %s\n' "$now" >> "$pend"
+    log "notify-uploads: slow heads-up sent (${pending}/${total} pending): $(basename "$pend")"
   else
     log "notify-uploads: waiting on upload (${pending}/${total} pending): $(basename "$pend")"
   fi
