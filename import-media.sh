@@ -113,6 +113,26 @@ notify_line() {
   fi
 }
 
+# Queue of imported sessions whose LINE notification should wait until the files
+# have finished uploading to the Drive cloud. Drained by notify-uploads.sh.
+PENDING_NOTIFY_DIR="$HOME/Library/Caches/import-media-pending"
+
+# Defer a LINE notification until this session's files are uploaded to Drive
+# (each dest gains a com.google.drivefs.item-id xattr when the cloud has it).
+# Writes a self-contained pending file: dest paths + the message body.
+# If the LINE helper isn't installed, there is nothing to defer — no-op.
+queue_upload_notification() {
+  local manifest="$1" msg="$2"
+  [[ -x "$HOME/bin/notify-line.sh" ]] || return 0
+  mkdir -p "$PENDING_NOTIFY_DIR"
+  local pend="$PENDING_NOTIFY_DIR/$(/usr/bin/basename "$manifest" .tsv).pending"
+  {
+    printf '@enqueued %s\n' "$(date +%s)"
+    /usr/bin/awk -F'\t' '/^#/{next} $1=="src"{next} $2!=""{print "@dst " $2}' "$manifest"
+    printf '@message\n%s\n' "$msg"
+  } > "$pend"
+}
+
 # Format bytes as human-readable string (KB/MB/GB).
 human_bytes() {
   /usr/bin/awk -v b="${1:-0}" 'BEGIN {
@@ -681,10 +701,12 @@ ${total} 件のファイルがありましたが取り込みは行われませ�
     notify_done "$label ($(basename "$vol"))" "新規 $copied 件 / 既存 $((scanned - copied)) 件"
     open_in_finder "$DEST_BASE/${source_hint:-$last_source}"
 
-    # Build the LINE message: 件数 / 撮影日 / 機種 / エラー or 全件成功 / 完了しました
+    # Build the LINE message: 件数 / 撮影日 / 機種 / エラー or 全件成功 / 完了しました.
+    # Defer the send until the files finish uploading to the Drive cloud, so the
+    # team is notified only when the videos are actually playable/available.
     local line_msg
     line_msg=$(build_line_message "$label" "$copied" "$manifest_file")
-    notify_line "$line_msg"
+    queue_upload_notification "$manifest_file" "$line_msg"
   else
     notify "$label $(basename "$vol")" "新規なし (既存 $scanned 件すべてスキップ)"
     notify_line "ℹ️ ${label} ($(basename "$vol"))
@@ -762,7 +784,8 @@ scan_downloads() {
     log "<== Downloads done: $placed moved"
     notify_done "Downloads → Movies" "$placed 件を移動"
     [[ -n "$last_dest" ]] && open_in_finder "$last_dest"
-    notify_line "$(build_line_message "Downloads" "$placed" "$dl_manifest")"
+    # Defer the LINE send until these files finish uploading to the Drive cloud.
+    queue_upload_notification "$dl_manifest" "$(build_line_message "Downloads" "$placed" "$dl_manifest")"
   else
     # No new files — discard the empty manifest.
     /bin/rm -f "$dl_manifest"

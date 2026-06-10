@@ -14,6 +14,7 @@ QUIET=0
 INSTALL_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SCRIPT_PATH="$INSTALL_DIR/import-media.sh"
 UPDATE_PATH="$INSTALL_DIR/update.sh"
+NOTIFY_PATH="$INSTALL_DIR/notify-uploads.sh"
 
 # Per-user destination paths derived from $HOME.
 LA_DIR="$HOME/Library/LaunchAgents"
@@ -25,6 +26,7 @@ APP_EXEC="$APP_BUNDLE/Contents/MacOS/MediaImport"
 
 IMPORT_PLIST="$LA_DIR/com.user.importmedia.plist"
 UPDATE_PLIST="$LA_DIR/com.user.importmedia.update.plist"
+NOTIFY_PLIST="$LA_DIR/com.user.importmedia.notify.plist"
 
 mkdir -p "$LA_DIR" "$LOG_DIR" "$MOVIES_DIR" "$APP_BUNDLE/Contents/MacOS"
 chmod +x "$INSTALL_DIR"/*.sh
@@ -170,11 +172,38 @@ cat > "$UPDATE_PLIST" <<EOF
 </plist>
 EOF
 
+# ---------- Generate upload-notify LaunchAgent (every 2 min) ----------
+# Sends the deferred LINE notification once a session's files finish uploading
+# to the Drive cloud. Harmless on Macs without ~/bin/notify-line.sh (no-op).
+cat > "$NOTIFY_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.importmedia.notify</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$NOTIFY_PATH</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>120</integer>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/import-media-notify.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/import-media-notify.err.log</string>
+</dict>
+</plist>
+EOF
+
 # ---------- (Re-)load LaunchAgents ----------
 launchctl unload "$IMPORT_PLIST" 2>/dev/null || true
 launchctl unload "$UPDATE_PLIST" 2>/dev/null || true
+launchctl unload "$NOTIFY_PLIST" 2>/dev/null || true
 launchctl load -w "$IMPORT_PLIST"
 launchctl load -w "$UPDATE_PLIST"
+launchctl load -w "$NOTIFY_PLIST"
 
 if [[ $QUIET -eq 1 ]]; then
   exit 0
